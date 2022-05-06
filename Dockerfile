@@ -7,7 +7,7 @@ ENV FLASK_RUN_HOST=0.0.0.0
 WORKDIR /code
 COPY requirements.txt /code/
 RUN pip install -r requirements.txt
-COPY ./yo1k/. /code/
+COPY ./yo1k/ /code/
 COPY Dockerfile /code/
 COPY docker-compose.yml /code/
 CMD ["flask", "run"]
