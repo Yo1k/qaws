@@ -27,35 +27,54 @@ Before starting, [install Compose](https://docs.docker.com/compose/install/) if 
 it. \
 Clone this git repository.
 
-`Dockerfile` starts with 
-[Python 3.9 parent image](https://hub.docker.com/r/library/python/tags/3.9) and describes 
-further modifications.
-`docker-compose.yml` describes the services that makes `qaws-app`. See the 
-[`docker-compose.yml` reference](https://docs.docker.com/compose/compose-file/) for more information.
-
-To build and run Docker image of the `qaws-app` run the following from the project 
+`Dockerfile` describes modifications of [Python 3.9 parent image](https://hub.docker.com/r/library/python/tags/3.9)
+needed to build 'qaws-app' image. \
+To build Docker's 'qaws-app' image run the following from the project 
 root directory: 
 
 ```shell
-$ docker compose up
+$ docker build --tag qaws-app .
 ```
 
-To shut down running services and clean up use either of these methods:
+`docker-compose.yml` describes how to create containers for the services: 'db' ans 'web'. 'db' is 
+service with PostgreSQL DBMS. 
+The 'postgres' image is used to run 'db'. See the 
+[reference](https://docs.docker.com/compose/compose-file/) for more 
+information about structure `docker-compose.yml`.
+'web' is service with our 'qwas-app'.
+
+To create and run only Docker container with PostgreSQL run from the project root directory: \
+(in the foreground)
+```shell
+$ docker compose up db
+```
+or (in the background)
+```shell
+$ docker compose up db -d
+```
+
+To shut down running services and clean up containers use either of these methods:
 * typing `Ctrl-C`
-* or switch to a different shell and run (also from the project root directory)
+* or switch to a different shell and run from the project root directory
 
 ```shell
 $ docker compose down
 ```
 
-To connect to DB switch to a different shell and run:
+To connect to running PostgreSQL run:
 ```shell
 $ psql -U postgres -W -h 127.0.0.1 -p 5432 postgres
 ```
 
-Input password: "postgres". It is assumed you have psql - PostgreSQL interactive terminal.
+Input password: 'postgres'. It is assumed you have psql - PostgreSQL interactive terminal.
 
-To send POST request to the `qaws-app` use:
+To run Docker container with 'qwas-app' service run from the project root directory:
+
+```shell
+$ docker compose up
+```
+
+To send POST request to the 'qaws-app' use:
 ```shell
 $ curl -X POST http://127.0.0.1:8000/ \
         -H 'Content-Type: application/json' \
@@ -67,7 +86,7 @@ $ curl -X POST http://127.0.0.1:8000/ \
         -H 'Content-Type: application/json' \
         -d '{"questions_num":1}'
 ```
-or run script located in the project root directory:
+or run from the project root directory:
 ```shell
 $ ./request.sh <your integer number>
 ```
