@@ -43,7 +43,7 @@ $ sudo service docker start
 
 `Dockerfile` describes modifications of [Python 3.9 parent image](https://hub.docker.com/r/library/python/tags/3.9)
 needed to build 'qaws-app' image. \
-To build Docker's 'qaws-app' image run the following from the project 
+To build Docker's 'qaws-app' image, run the following from the project 
 root directory: 
 
 ```shell
@@ -62,7 +62,7 @@ information about structure `docker-compose.yml`.
 'web' is service that runs 'qaws-app' image and also has dependency on 'db'. Make sure you create 
 the 'qaws-app' image before starting the services.
 
-To create and run only Docker container with PostgreSQL run from the project root directory:
+To create and run only Docker container with PostgreSQL, run from the project root directory:
 
 ```shell
 $ sudo docker compose up db
@@ -74,14 +74,17 @@ or use flag `-d` to start the service in the background
 $ sudo docker compose up db -d
 ```
 
-To create and run Docker container with 'qaws-app' service run from the project root directory:
+To create and run Docker container with 'qaws-app' application, run from the project root directory:
 
 ```shell
 $ sudo docker compose up
 ```
 
-To shut down running services and clean up containers use either of these methods:
-* typing `Ctrl-C` (if the service is running in the foreground)
+To shut down running services and clean up containers, use either of these methods:
+* stop the application by typing `Ctrl-C` in the same shell (if the service is running in the 
+  foreground) 
+  in where you started it, then use `sudo docker rm <CONTAINER ID | NAME>` to remove containers 
+  (to see containers list `sudo docker ps -a`)
 * or switch to a different shell and run from the project root directory
 
 ```shell
@@ -90,7 +93,7 @@ $ sudo docker compose down
 
 ## Application
 
-To connect to running 'db' service with PostgreSQL run:
+To connect to running 'db' service with PostgreSQL, run:
 
 ```shell
 $ psql -U postgres -W -h 127.0.0.1 -p 5432 postgres
@@ -98,7 +101,7 @@ $ psql -U postgres -W -h 127.0.0.1 -p 5432 postgres
 
 Input password: 'postgres'. It is assumed you have psql - PostgreSQL interactive terminal.
 
-To send POST request to the running 'qaws-app' use:
+To send POST request to the running 'qaws-app', use:
 
 ```shell
 $ curl -X POST http://127.0.0.1:8000/ \
@@ -118,4 +121,26 @@ or run from the project root directory:
 
 ```shell
 $ ./request.sh <not negative integer number>
+```
+
+## Run static checkers
+
+Use command `sudo docker ps` to find the `CONTAINER ID` for 'qwas-app'. After that, run:
+
+```shell
+$ sudo docker exec -it <CONTAINER ID> sh
+```
+
+This will create a new Bash session in the running container. 
+
+To analyze and report errors, check style of Python code, run:
+
+```shell
+$ pylint ./yo1k/qaws
+```
+
+To check static types of Python code, run:
+
+```shell
+$ mypy ./yo1k/qaws
 ```

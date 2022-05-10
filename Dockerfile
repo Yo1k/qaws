@@ -5,9 +5,8 @@ ENV PYTHONUNBUFFERED=1
 ENV FLASK_APP=yo1k.qaws.qaws_app
 ENV FLASK_RUN_HOST=0.0.0.0
 WORKDIR /code
-COPY requirements.txt /code/
+COPY requirements.txt requirements.txt
 RUN pip install -r requirements.txt
-COPY ./yo1k/ /code/
-COPY Dockerfile /code/
-COPY docker-compose.yml /code/
+COPY . .
 CMD ["flask", "run"]
+
