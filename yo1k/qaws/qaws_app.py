@@ -32,17 +32,19 @@ def get_db():  # type: ignore
                     cur.execute(schema.read())
     return g.db
 
-# SKTODO make count for returning
+
 def prepare_updqstn() -> None:
     with g.db:
         with g.db.cursor() as cur:
             cur.execute(
                     """
                     PREPARE updqstn (int[], text[], text[], timestamptz[]) AS
-                        INSERT INTO questions
-                        (SELECT * from unnest($1, $2, $3, $4))
-                        ON CONFLICT (id) DO NOTHING
-                        RETURNING count(id);
+                        WITH inserted AS (
+                            INSERT INTO questions
+                            (SELECT * FROM unnest($1, $2, $3, $4))
+                            ON CONFLICT (id) DO NOTHING
+                            RETURNING id)
+                        SELECT COUNT(*) FROM inserted;
                     """)
 
 
@@ -52,15 +54,12 @@ def reformat_information(raw_data):
 
 
 def insert_questions(data) -> int:
-    # with g.db:
     with g.db.cursor() as cur:
         cur.execute(
                 "EXECUTE updqstn (%s, %s, %s, %s::timestamptz[]);",
                 data)
         returning: list[tuple[Any]] = cur.fetchall()
-    print(returning)
-    print(len(returning))
-    return len(returning)
+    return returning[0][0]
 
 
 @app.teardown_request
