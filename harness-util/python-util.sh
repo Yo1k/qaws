@@ -9,7 +9,7 @@ source ./harness-util/util.sh
 function create_python_venv() {
     IN_PYTHON_VENV=$(in_python_venv)
     if [[ ${IN_PYTHON_VENV} = "false" ]]; then
-        python3 -m venv "./${PYTHON_VENV}"
+        python3 -m venv --upgrade-deps "./${PYTHON_VENV}"
         activate_python_venv;
     fi
     python3 -m pip install -r requirements.txt

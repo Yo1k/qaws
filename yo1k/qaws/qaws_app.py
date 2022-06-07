@@ -1,12 +1,10 @@
-import os
 import urllib.request
 import json
 from typing import Any, Union
 from flask import Flask, abort, current_app
 from flask import request, g
-import psycopg2  # type: ignore
-import psycopg2.errors  # type: ignore
-import psycopg2.extras # type: ignore
+import psycopg
+import psycopg.errors
 
 app: Flask = Flask(__name__)
 
@@ -19,33 +17,18 @@ def get_questions(num: int) -> list[dict[str, Any]]:
 
 def get_db():  # type: ignore
     if "db" not in g:
-        g.db = psycopg2.connect(  # pylint: disable=E0237
+        g.db = psycopg.connect(  # pylint: disable=E0237
                 dbname="postgres",
                 user="postgres",
                 password="postgres",
                 # host="db",
                 host="127.0.0.1",
                 port="5432")
-        with g.db:
+        with g.db.transaction():
             with g.db.cursor() as cur:
                 with current_app.open_resource("questions_schema.sql") as schema:
                     cur.execute(schema.read())
     return g.db
-
-
-def prepare_updqstn() -> None:
-    with g.db:
-        with g.db.cursor() as cur:
-            cur.execute(
-                    """
-                    PREPARE updqstn (int[], text[], text[], timestamptz[]) AS
-                        WITH inserted AS (
-                            INSERT INTO questions
-                            (SELECT * FROM unnest($1, $2, $3, $4))
-                            ON CONFLICT (id) DO NOTHING
-                            RETURNING id)
-                        SELECT COUNT(*) FROM inserted;
-                    """)
 
 
 def reformat_information(raw_data):
@@ -56,7 +39,17 @@ def reformat_information(raw_data):
 def insert_questions(data) -> int:
     with g.db.cursor() as cur:
         cur.execute(
-                "EXECUTE updqstn (%s, %s, %s, %s::timestamptz[]);",
+                """
+                WITH inserted AS (
+                    INSERT INTO questions
+                    (SELECT * FROM unnest(
+                            %s::int[],
+                            %s::text[],
+                            %s::text[],
+                            %s::timestamptz[]))
+                    ON CONFLICT (id) DO NOTHING
+                    RETURNING id)
+                SELECT COUNT(*) FROM inserted;""",
                 data)
         returning: list[tuple[Any]] = cur.fetchall()
     return returning[0][0]
@@ -84,7 +77,6 @@ def request_questions() -> Union[str, dict[None, None], None]:
             prep_data = reformat_information(questions_list)
 
             get_db()  # type: ignore
-            prepare_updqstn()
 
             retries: int = 100
             while retries > 0:
