@@ -1,94 +1,137 @@
 import urllib.request
 import json
-from typing import Any, Union
+from abc import ABC
+from typing import Any, Union, Optional, Generic, TypeVar, Sequence
 from flask import Flask, abort, current_app
 from flask import request, g
 import psycopg
 import psycopg.errors
 
-app: Flask = Flask(__name__)
+
+T = TypeVar("T")
+JSONType = dict[str, Any]
 
 
-def get_questions(num: int) -> list[dict[str, Any]]:
-    with urllib.request.urlopen(url=f"https://jservice.io/api/random?count={num}") as response:
-        data: list[dict[str, Any]] = json.loads(response.read())
-    return data
+class QuestionService(ABC, Generic[T]):
+    def get_questions(self, num: int) -> Sequence[T]:
+        pass
 
 
-def get_db():  # type: ignore
-    if "db" not in g:
-        g.db = psycopg.connect(  # pylint: disable=E0237
+class StorageService(ABC):
+    def insert_uniq_questions(self, data: list[list[Any]]):
+        pass
+
+
+class JSONQuestionService(QuestionService[JSONType]):
+    def __init__(self, url="https://jservice.io/api/random?count="):
+        self.__url = url
+
+    def get_questions(self, num: int) -> Sequence[JSONType]:
+        with urllib.request.urlopen(url=f"{self.__url}{num}") as response:
+            data: Sequence[JSONType] = json.loads(response.read())
+        return data
+
+
+class DefaultQuestionService(QuestionService[Sequence[Any]]): #SKTODO ABC
+    def __init__(self, delegate: JSONQuestionService):
+        self.__delegate = delegate
+        self.__cache_json_data = []  # SKTODO choose the right data structure
+
+    def get_last_question(self) -> Union[str, list]:
+        if self.__cache_json_data:
+            return self.__cache_json_data[-1]["question"]
+        else:
+            assert False, f"{self.__cache_json_data}"
+
+    def get_questions(self, num: int) -> Sequence[Sequence[Any]]:
+        self.__fetch_raw_data(num)
+        return self.__reformat_information()
+
+    def __fetch_raw_data(self, num: int) -> None:
+        self.__cache_json_data = self.__delegate.get_questions(num)
+
+    # SKTODO rebuild to nametuple[MutSequese[Any]]
+    def __reformat_information(self) -> Sequence[Sequence[Any]]:
+        key_list: Sequence[str] = ["id", "question", "answer", "created_at"]
+        return [[row[key] for row in self.__cache_json_data] for key in key_list]
+
+
+class PostgresqlStorageService(StorageService):
+    def __init__(self, schema="./yo1k/qaws/questions_schema.sql"):
+        self.schema = schema
+        self.__conn = psycopg.connect(
                 dbname="postgres",
                 user="postgres",
                 password="postgres",
                 # host="db",
                 host="127.0.0.1",
                 port="5432")
-        with g.db.transaction():
-            with g.db.cursor() as cur:
-                with current_app.open_resource("questions_schema.sql") as schema:
+        self.__create_table()
+
+    def __create_table(self):
+        with self.__conn.transaction():
+            with self.__conn.cursor() as cur:
+                with open(self.schema) as schema:
                     cur.execute(schema.read())
-    return g.db
+
+    def insert_uniq_questions(self, data: list[list[Any]]) -> int:
+        with self.__conn.cursor() as cur:
+            cur.execute(
+                    """
+                    WITH inserted AS (
+                        INSERT INTO questions
+                        (SELECT * FROM unnest(
+                                %s::int[],
+                                %s::text[],
+                                %s::text[],
+                                %s::timestamptz[]))
+                        ON CONFLICT (id) DO NOTHING
+                        RETURNING id)
+                    SELECT COUNT(*) FROM inserted;""",
+                    data)
+            returning: list[tuple[Any]] = cur.fetchall()
+        return returning[0][0]
+
+    def finalize(self) -> None:
+        self.__conn.commit()
+        self.__conn.close()
 
 
-def reformat_information(raw_data):
-    key_list = ["id", "question", "answer", "created_at"]
-    return [[row[key] for row in raw_data] for key in key_list]
+def init_flask_app_context():
+    # config = app.config
+    g.db_service = PostgresqlStorageService()
+    g.client = JSONQuestionService()
+    g.questions_service = DefaultQuestionService(g.client)
 
 
-def insert_questions(data) -> int:
-    with g.db.cursor() as cur:
-        cur.execute(
-                """
-                WITH inserted AS (
-                    INSERT INTO questions
-                    (SELECT * FROM unnest(
-                            %s::int[],
-                            %s::text[],
-                            %s::text[],
-                            %s::timestamptz[]))
-                    ON CONFLICT (id) DO NOTHING
-                    RETURNING id)
-                SELECT COUNT(*) FROM inserted;""",
-                data)
-        returning: list[tuple[Any]] = cur.fetchall()
-    return returning[0][0]
+def create_app():
+    app = Flask(__name__)
 
+    app.before_request(init_flask_app_context)
 
-@app.teardown_request
-def close_db(_=None) -> None:  # type: ignore
-    db = g.pop("db", None)
+    @app.teardown_request
+    def final(e=None):
+        print(f"{'questions_service' in g}")
+        g.db_service.finalize()
 
-    if db is not None:
-        db.commit()
-        db.close()
-
-
-@app.route('/', methods=['POST'])
-def request_questions() -> Union[str, dict[None, None], None]:
-    if request.method == "POST":
+    @app.route('/', methods=['POST'])
+    def request_questions() -> Union[str, dict[None, None], None]:
+        # if request.method == "POST":
         questions_num: int = request.get_json().get('questions_num')  # type: ignore
         assert isinstance(questions_num, int) and questions_num >= 0, \
             f"questions_num={questions_num}"
         if questions_num == 0:
             return {}
         else:
-            questions_list = get_questions(questions_num)
-            prep_data = reformat_information(questions_list)
-
-            get_db()  # type: ignore
-
+            prep_data = g.questions_service.get_questions(questions_num)
             retries: int = 100
             while retries > 0:
                 retries -= 1
-                fail_uniq_num = questions_num - insert_questions(prep_data)
-                questions_num = fail_uniq_num
-
+                fail_uniq_num = questions_num - g.db_service.insert_uniq_questions(prep_data)
                 if fail_uniq_num:
-                    questions_list = get_questions(fail_uniq_num)
-                    prep_data = reformat_information(questions_list)
+                    prep_data = g.questions_service.get_questions(fail_uniq_num)
                 else:
-                    return f"{questions_list[-1]['question']}"
-
+                    return g.questions_service.get_last_question()
             abort(500)
-    return None
+
+    return app
