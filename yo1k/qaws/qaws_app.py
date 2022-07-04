@@ -1,3 +1,4 @@
+import atexit
 import urllib.request
 import json
 from abc import ABC, abstractmethod
@@ -60,7 +61,7 @@ class DefaultQuestionService(QuestionService[PreparedQuestions]):
         return prep_questions
 
 
-class PostgresqlStorageService(StorageService):
+class PgStorageService(StorageService):
     def insert_uniq_questions(self, questions: PreparedQuestions, conn: Connection) -> int:
         with conn.cursor() as cur:
             cur.execute(
@@ -77,15 +78,16 @@ class PostgresqlStorageService(StorageService):
                     SELECT COUNT(*) FROM inserted;""",
                     questions)
             returning: list[tuple[Any]] = cur.fetchall()
-        return returning[0][0]
+            inserted_count: int = returning[0][0]
+            return inserted_count
 
 
 class QAWS:
     def __init__(
             self,
-            db_service: PostgresqlStorageService,
+            db_service: PgStorageService,
             questions_service: DefaultQuestionService):
-        self.db_service: PostgresqlStorageService = db_service
+        self.db_service: PgStorageService = db_service
         self.questions_service: DefaultQuestionService = questions_service
 
     def request_questions(self, conn: Connection) -> Union[str, dict]:
@@ -110,11 +112,6 @@ class QAWS:
             abort(500)
 
 
-def with_tx_connection(pool: ConnectionPool, func: Callable):
-    with pool.connection() as conn:
-        return func(conn)
-
-
 def init_schema(conn: Connection) -> None:
     with conn.cursor() as cur:
         with current_app.open_resource('schema.sql') as schema:
@@ -130,15 +127,23 @@ def create_app():
                      "host='127.0.0.1'"
                      "port='5432'",
             open=False)
-    db_service = PostgresqlStorageService()
+    db_service = PgStorageService()
     question_service = DefaultQuestionService(delegate=JSONQuestionService())
     qaws = QAWS(
             db_service=db_service,
             questions_service=question_service)
 
-    app.before_first_request(f=lambda: (
-            conn_pool.open()
-            and with_tx_connection(pool=conn_pool, func=init_schema)))
+    def with_tx_connection(
+            pool: ConnectionPool,
+            func: Callable[[Connection], T_co]) -> T_co:
+        with pool.connection() as conn:
+            return func(conn)
+
+    def before_first_request() -> None:
+        conn_pool.open()
+        atexit.register(conn_pool.close)
+        with_tx_connection(pool=conn_pool, func=init_schema)
+    app.before_first_request(f=before_first_request)
 
     app.add_url_rule(
             rule="/",
@@ -146,4 +151,5 @@ def create_app():
             view_func=lambda: with_tx_connection(
                     pool=conn_pool,
                     func=qaws.request_questions))
+
     return app
