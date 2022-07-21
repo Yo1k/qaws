@@ -4,7 +4,7 @@ import json
 from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Any, Generic, TypeVar, Sequence, NamedTuple, MutableSequence, Union, Callable
-from flask import Flask, abort, current_app
+from flask import Flask, abort, current_app, g
 from flask import request
 from psycopg import Connection
 from psycopg_pool import ConnectionPool
@@ -29,7 +29,17 @@ class QuestionService(ABC, Generic[T_co]):
 
 class StorageService(ABC):
     @abstractmethod
-    def insert_uniq_questions(self, questions: PreparedQuestions, conn: Connection) -> int:
+    def insert_uniq_questions(self, conn: Connection, questions: PreparedQuestions) -> int:
+        pass
+
+
+class TransactionManager(ABC):
+    @abstractmethod
+    def do_in_default_tx(
+            self,
+            func: Callable[..., T_co],
+            *args,
+            **kwargs) -> T_co:
         pass
 
 
@@ -61,8 +71,17 @@ class DefaultQuestionService(QuestionService[PreparedQuestions]):
         return prep_questions
 
 
+class DefaultTransactionManager(TransactionManager):
+    def do_in_default_tx(
+            self,
+            func: Callable[..., T_co],
+            *args,
+            **kwargs) -> T_co:
+        return func(conn=g.conn, *args, **kwargs)
+
+
 class PgStorageService(StorageService):
-    def insert_uniq_questions(self, questions: PreparedQuestions, conn: Connection) -> int:
+    def insert_uniq_questions(self, conn: Connection, questions: PreparedQuestions) -> int:
         with conn.cursor() as cur:
             cur.execute(
                     """
@@ -85,12 +104,14 @@ class PgStorageService(StorageService):
 class QAWS:
     def __init__(
             self,
+            tx_manager: TransactionManager,
             db_service: PgStorageService,
             questions_service: DefaultQuestionService):
+        self.tx_manager: TransactionManager = tx_manager
         self.db_service: PgStorageService = db_service
         self.questions_service: DefaultQuestionService = questions_service
 
-    def request_questions(self, conn: Connection) -> Union[str, dict]:
+    def request_questions(self) -> Union[str, dict]:
         questions_num: int = request.get_json().get('questions_num')
         assert isinstance(questions_num, int) and questions_num >= 0, \
             f"questions_num={questions_num}"
@@ -101,9 +122,10 @@ class QAWS:
             retries: int = 100
             while retries > 0:
                 retries -= 1
-                fail_uniq_num = (
-                        questions_num
-                        - self.db_service.insert_uniq_questions(questions, conn=conn))
+                inserted_questions_num = self.tx_manager.do_in_default_tx(
+                        func=self.db_service.insert_uniq_questions,
+                        questions=questions)
+                fail_uniq_num = questions_num - inserted_questions_num
                 if fail_uniq_num:
                     questions = self.questions_service.get_questions(fail_uniq_num)
                     questions_num = fail_uniq_num
@@ -127,29 +149,32 @@ def create_app():
                      "host='127.0.0.1'"
                      "port='5432'",
             open=False)
+    tx_manager = DefaultTransactionManager()
     db_service = PgStorageService()
     question_service = DefaultQuestionService(delegate=JSONQuestionService())
     qaws = QAWS(
+            tx_manager=tx_manager,
             db_service=db_service,
             questions_service=question_service)
-
-    def with_tx_connection(
-            pool: ConnectionPool,
-            func: Callable[[Connection], T_co]) -> T_co:
-        with pool.connection() as conn:
-            return func(conn)
 
     def before_first_request() -> None:
         conn_pool.open()
         atexit.register(conn_pool.close)
-        with_tx_connection(pool=conn_pool, func=init_schema)
-    app.before_first_request(f=before_first_request)
 
+    def get_conn() -> None:
+        g.conn = conn_pool.getconn()
+
+    def close_conn(e) -> None:
+        conn = g.pop("conn", None)
+        if conn is not None:
+            conn.commit()
+            conn_pool.putconn(conn)
+
+    app.before_first_request(before_first_request)
+    app.before_request(get_conn)
     app.add_url_rule(
             rule="/",
             methods=['POST'],
-            view_func=lambda: with_tx_connection(
-                    pool=conn_pool,
-                    func=qaws.request_questions))
-
+            view_func=qaws.request_questions)
+    app.teardown_request(close_conn)
     return app
