@@ -125,7 +125,7 @@ $ ./request.sh <not negative integer number>
 
 ## Run static checkers
 
-Use command `sudo docker ps` to find the `CONTAINER ID` for 'qwas-app'. After that, run:
+Use command `sudo docker ls` to find the `CONTAINER ID` for 'qwas-app'. After that, run:
 
 ```shell
 $ sudo docker exec -it <CONTAINER ID> sh
