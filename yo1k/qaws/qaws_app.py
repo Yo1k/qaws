@@ -161,7 +161,7 @@ def create_app() -> Flask:
             db_service=db_service,
             questions_service=question_service)
 
-    def before_first_request() -> None:
+    with app.app_context():
         conn_pool.open()
         atexit.register(conn_pool.close)
         with conn_pool.connection() as conn:
@@ -176,7 +176,6 @@ def create_app() -> Flask:
             conn.commit()
             conn_pool.putconn(conn)
 
-    app.before_first_request(before_first_request)
     app.before_request(get_conn)
     app.add_url_rule(
             rule="/",

@@ -22,7 +22,7 @@ the application sends new requests to the public API to get unique questions);
 Tech stack: \
 [Flask](https://flask.palletsprojects.com/en/2.1.x/),
 [PostgreSQL](https://www.postgresql.org/),
-[psycopg2](https://www.psycopg.org/docs/index.html),
+[psycopg3](https://www.psycopg.org/psycopg3/),
 [Docker](https://www.docker.com/)
 
 ## Docker instructions
